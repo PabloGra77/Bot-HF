@@ -8,7 +8,7 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>HorusBotHF</AssemblyName>
     <RootNamespace>HorusAfiliadosExtractor.App</RootNamespace>
-    <Version>1.0.3</Version>
+    <Version>1.0.4</Version>
     <Company>Horus FPS</Company>
     <Product>Bot HF - Extractor de Afiliados</Product>
   </PropertyGroup>

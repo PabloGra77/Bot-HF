@@ -36,6 +36,14 @@ Desktop.ini
 .DS_Store
 
 # ============================================================
+# Carpetas locales con instaladores externos descargados
+# (no se distribuyen via repo; Velopack los maneja con --framework)
+# ============================================================
+INSTALADOR DE BOT COMPLETENTO/
+INSTALADOR*/
+*runtime*.exe
+
+# ============================================================
 # Credenciales (por si alguien las pega por error)
 # ============================================================
 *.pfx

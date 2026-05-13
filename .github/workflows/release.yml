@@ -67,6 +67,8 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path releases | Out-Null
+          # --framework: Velopack verificará e instalará .NET 8 Desktop Runtime
+          # automáticamente si falta en el PC del usuario.
           vpk pack `
             --packId BotHF `
             --packVersion ${{ steps.ver.outputs.version }} `
@@ -74,6 +76,7 @@ jobs:
             --mainExe HorusBotHF.exe `
             --packTitle "Bot HF - Extractor Horus FPS" `
             --packAuthors "Horus FPS" `
+            --framework net8.0-x64-desktop `
             --outputDir releases
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Get-ChildItem releases
