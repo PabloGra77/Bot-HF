@@ -1,0 +1,12 @@
+FORMATO CORRECTO PARA input\cedulas.csv
+
+El archivo debe tener una columna llamada Documento.
+Pegue una cédula por fila. No deje el dato de ejemplo 1234567890.
+
+Ejemplo:
+Documento
+20683684
+1006197901
+41794986
+
+También puede usar punto y coma, pero para una sola columna no es necesario.

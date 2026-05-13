@@ -1,0 +1,45 @@
+# ============================================================
+# Datos sensibles / PHI - NUNCA subir a un repo p�blico
+# ============================================================
+profiles/
+logs/
+evidence/
+output/
+input/cedulas.csv
+input/*.xlsx
+input/*.xlsm
+
+# Permitir un archivo de ejemplo
+!input/cedulas.example.csv
+
+# ============================================================
+# Compilaci�n .NET
+# ============================================================
+bin/
+obj/
+publish/
+*.user
+*.suo
+.vs/
+
+# ============================================================
+# Instalador
+# ============================================================
+installer/Output/
+installer/*.exe
+
+# ============================================================
+# Sistema
+# ============================================================
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ============================================================
+# Credenciales (por si alguien las pega por error)
+# ============================================================
+*.pfx
+*.snk
+secrets.json
+appsettings.local.json
+appsettings.Development.json
