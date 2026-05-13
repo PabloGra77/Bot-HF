@@ -19,10 +19,9 @@ public sealed class BotSettings
     public bool PauseBeforeProcessing { get; set; } = false;
     public bool NavigateModuleAfterLogin { get; set; } = true;
 
-    public string EmailFieldSelectors { get; set; } = "input[type='email'], input[name*='mail' i], input[name*='user' i], input[name*='usuario' i], input[id*='mail' i], input[id*='user' i], input[id*='usuario' i]";
+    public string EmailFieldSelectors { get; set; } = "input[type='email'], input[autocomplete='email'], input[autocomplete='username'], input[name*='mail' i], input[name*='user' i], input[name*='usuario' i], input[id*='mail' i], input[id*='user' i], input[id*='usuario' i]";
     public string PasswordFieldSelectors { get; set; } = "input[type='password']";
-    public string UserTypeSelectors { get; set; } = "select[name*='tipo' i], select[id*='tipo' i], select[name*='rol' i], select[id*='rol' i]";
-    public string SubmitButtonSelectors { get; set; } = "button[type='submit'], button:has-text('Ingresar'), button:has-text('Iniciar'), button:has-text('Entrar'), input[type='submit']";
+    public string SubmitButtonSelectors { get; set; } = "button:has-text('INICIAR SESIÓN'), button:has-text('INICIAR SESION'), button:has-text('Iniciar sesión'), button:has-text('Iniciar sesion'), button[type='submit'], input[type='submit'], .v-btn:has-text('INICIAR')";
     public bool ClickNuevaConsultaBeforeEach { get; set; } = true;
     public bool SaveScreenshots { get; set; } = true;
     public bool ExtractVisibleBodyText { get; set; } = true;

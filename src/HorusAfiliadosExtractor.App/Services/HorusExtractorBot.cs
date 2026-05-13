@@ -173,37 +173,32 @@ public sealed class HorusExtractorBot
 
     private async Task AttemptAutoLoginAsync(IPage page, LoginCredentials credentials, CancellationToken cancellationToken)
     {
-        _log.Info($"Login automático como '{credentials.Type}' ({credentials.Email})");
+        var typeLabel = credentials.Type == UserType.Funcionario ? "Funcionario" : "Afiliado";
+        _log.Info($"Login automático como '{typeLabel}' ({credentials.Email})");
+
         try
         {
-            // Selector tipo de usuario (combo / select).
-            var typeLoc = page.Locator(_cfg.UserTypeSelectors).First;
-            if (await typeLoc.CountAsync() > 0)
-            {
-                try
-                {
-                    await typeLoc.SelectOptionAsync(new SelectOptionValue { Label = credentials.Type.ToString() });
-                    _log.Info("Tipo de usuario seleccionado por etiqueta.");
-                }
-                catch
-                {
-                    try { await typeLoc.SelectOptionAsync(credentials.Type.ToString()); }
-                    catch { _log.Warn("No se pudo establecer el tipo de usuario automáticamente. Si la página lo exige, ajuste manualmente."); }
-                }
-            }
-
+            // 1) Abrir el combobox Vuetify "Seleccione el tipo usuario".
+            await OpenUserTypeDropdownAsync(page);
             cancellationToken.ThrowIfCancellationRequested();
 
+            // 2) Seleccionar la opción Afiliado / Funcionario en el dropdown.
+            await PickUserTypeOptionAsync(page, typeLabel);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // 3) Esperar a que el campo Email aparezca (el formulario lo muestra después de elegir tipo).
+            await page.WaitForTimeoutAsync(400);
             var emailLoc = page.Locator(_cfg.EmailFieldSelectors).First;
             await emailLoc.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = _cfg.TimeoutSeconds * 1000 });
             await emailLoc.FillAsync(credentials.Email);
 
+            // 4) Password.
             var passLoc = page.Locator(_cfg.PasswordFieldSelectors).First;
             await passLoc.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = _cfg.TimeoutSeconds * 1000 });
             await passLoc.FillAsync(credentials.Password);
-
             cancellationToken.ThrowIfCancellationRequested();
 
+            // 5) Botón INICIAR SESIÓN.
             var submitLoc = page.Locator(_cfg.SubmitButtonSelectors).First;
             if (await submitLoc.CountAsync() > 0)
                 await submitLoc.ClickAsync(new LocatorClickOptions { Timeout = _cfg.TimeoutSeconds * 1000 });
@@ -211,11 +206,14 @@ public sealed class HorusExtractorBot
                 await passLoc.PressAsync("Enter");
 
             await SafeNetworkIdleAsync(page, 12000);
+            await page.WaitForTimeoutAsync(800);
 
+            // 6) Verificar resultado: si la URL sigue en la raíz y vemos el formulario de login, posible error.
             var body = await BodyTextAsync(page);
             if (body.Contains("incorrect", StringComparison.OrdinalIgnoreCase)
                 || body.Contains("inválid", StringComparison.OrdinalIgnoreCase)
                 || body.Contains("invalid", StringComparison.OrdinalIgnoreCase)
+                || body.Contains("credenciales", StringComparison.OrdinalIgnoreCase) && body.Contains("error", StringComparison.OrdinalIgnoreCase)
                 || body.Contains("no autorizado", StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException("Credenciales rechazadas por el servidor.");
@@ -226,8 +224,121 @@ public sealed class HorusExtractorBot
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
-            _log.Warn($"Login automático no completó: {ex.Message}. Si la ventana de navegador sigue en la pantalla de login, complete manualmente y vuelva a ejecutar.");
+            _log.Warn($"Login automático no completó: {ex.Message}. Si la ventana de navegador sigue en la pantalla de login, complete manualmente y vuelva a presionar continuar.");
         }
+    }
+
+    private async Task OpenUserTypeDropdownAsync(IPage page)
+    {
+        // Estrategias en orden de preferencia para abrir el v-select de tipo de usuario.
+        var attempts = new Func<Task<bool>>[]
+        {
+            async () =>
+            {
+                var loc = page.GetByText("Seleccione el tipo usuario").First;
+                if (await loc.CountAsync() == 0) return false;
+                await loc.ClickAsync(new LocatorClickOptions { Timeout = 5000 });
+                return true;
+            },
+            async () =>
+            {
+                var loc = page.Locator("[role='combobox']").First;
+                if (await loc.CountAsync() == 0) return false;
+                await loc.ClickAsync(new LocatorClickOptions { Timeout = 5000 });
+                return true;
+            },
+            async () =>
+            {
+                var loc = page.Locator(".v-select, .v-autocomplete").First;
+                if (await loc.CountAsync() == 0) return false;
+                await loc.ClickAsync(new LocatorClickOptions { Timeout = 5000 });
+                return true;
+            },
+            async () =>
+            {
+                var loc = page.Locator(".v-field, .v-input__control").First;
+                if (await loc.CountAsync() == 0) return false;
+                await loc.ClickAsync(new LocatorClickOptions { Timeout = 5000 });
+                return true;
+            }
+        };
+
+        foreach (var attempt in attempts)
+        {
+            try
+            {
+                if (await attempt())
+                {
+                    await page.WaitForTimeoutAsync(350);
+                    _log.Info("Combobox de tipo de usuario abierto.");
+                    return;
+                }
+            }
+            catch { /* probar siguiente */ }
+        }
+
+        throw new InvalidOperationException("No se encontró el combobox 'Seleccione el tipo usuario'.");
+    }
+
+    private async Task PickUserTypeOptionAsync(IPage page, string optionText)
+    {
+        var attempts = new Func<Task<bool>>[]
+        {
+            async () =>
+            {
+                var loc = page.GetByRole(AriaRole.Option, new PageGetByRoleOptions { Name = optionText, Exact = true }).First;
+                if (await loc.CountAsync() == 0) return false;
+                await loc.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = 5000 });
+                await loc.ClickAsync(new LocatorClickOptions { Timeout = 5000 });
+                return true;
+            },
+            async () =>
+            {
+                var loc = page.Locator(".v-list-item").GetByText(optionText, new LocatorGetByTextOptions { Exact = true }).First;
+                if (await loc.CountAsync() == 0) return false;
+                await loc.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = 5000 });
+                await loc.ClickAsync(new LocatorClickOptions { Timeout = 5000 });
+                return true;
+            },
+            async () =>
+            {
+                var loc = page.Locator($".v-list-item:has-text(\"{optionText}\")").First;
+                if (await loc.CountAsync() == 0) return false;
+                await loc.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = 5000 });
+                await loc.ClickAsync(new LocatorClickOptions { Timeout = 5000 });
+                return true;
+            },
+            async () =>
+            {
+                // Última opción: clic por JS evaluando el texto exacto.
+                return await page.EvaluateAsync<bool>(
+                    """
+(text) => {
+    const items = Array.from(document.querySelectorAll('.v-list-item, [role=option]'));
+    const target = items.find(el => (el.innerText || '').trim().toUpperCase() === text.toUpperCase());
+    if (!target) return false;
+    target.scrollIntoView({block:'center'});
+    target.click();
+    return true;
+}
+""", optionText);
+            }
+        };
+
+        foreach (var attempt in attempts)
+        {
+            try
+            {
+                if (await attempt())
+                {
+                    _log.Info($"Tipo de usuario seleccionado: {optionText}");
+                    return;
+                }
+            }
+            catch { /* probar siguiente */ }
+        }
+
+        throw new InvalidOperationException($"No se pudo seleccionar la opción '{optionText}' del combobox.");
     }
 
     private async Task EnsureModuleAsync(IPage page)
