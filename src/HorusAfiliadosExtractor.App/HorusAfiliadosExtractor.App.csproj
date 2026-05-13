@@ -16,5 +16,10 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Playwright" Version="1.49.0" />
     <PackageReference Include="ClosedXML" Version="0.104.2" />
+    <PackageReference Include="Velopack" Version="0.0.1298" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\cedulas.template.csv" />
   </ItemGroup>
 </Project>

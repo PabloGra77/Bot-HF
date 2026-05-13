@@ -3,15 +3,23 @@ using HorusAfiliadosExtractor.App.Forms;
 using HorusAfiliadosExtractor.App.Models;
 using HorusAfiliadosExtractor.App.Services;
 using HorusAfiliadosExtractor.App.Utils;
+using Velopack;
 
 namespace HorusAfiliadosExtractor.App;
 
 internal static class Program
 {
+    public static UpdateService Updater { get; } = new();
+
     [STAThread]
     public static void Main(string[] args)
     {
+        VelopackApp.Build().Run();
+
         ApplicationConfiguration.Initialize();
+
+        // Chequeo de actualizaciones en background: no bloquea la UI.
+        _ = Task.Run(async () => await Updater.CheckAndDownloadAsync());
 
         try
         {
@@ -19,20 +27,28 @@ internal static class Program
             var cfg = ConfigLoader.Load(configPath);
 
             using var login = new LoginForm(cfg.Bot.InputPath);
-            if (login.ShowDialog() != DialogResult.OK) return;
+            if (login.ShowDialog() != DialogResult.OK)
+            {
+                Updater.ApplyPendingIfAnyOnExit();
+                return;
+            }
 
             cfg.Bot.InputPath = login.InputPath;
 
             var progress = new ProgressForm();
             progress.Show();
 
+            void OnUpdateStatus(string m) { try { progress.AppendLog($"[UPDATE] {m}"); } catch { } }
+            void OnUpdateReady(string v) { try { progress.AppendLog($"[UPDATE] Versión {v} lista. Se aplicará al cerrar."); } catch { } }
+            Updater.StatusChanged += OnUpdateStatus;
+            Updater.UpdateReady += OnUpdateReady;
+
             var cts = new CancellationTokenSource();
-            progress.FormClosing += (_, e) =>
+            progress.FormClosing += (_, _) =>
             {
-                if (!cts.IsCancellationRequested)
-                {
-                    cts.Cancel();
-                }
+                if (!cts.IsCancellationRequested) cts.Cancel();
+                Updater.StatusChanged -= OnUpdateStatus;
+                Updater.UpdateReady -= OnUpdateReady;
             };
 
             Task.Run(() => RunExtractionAsync(cfg, login.Credentials, progress, cts.Token));
@@ -42,6 +58,10 @@ internal static class Program
         catch (Exception ex)
         {
             MessageBox.Show($"Error iniciando la aplicación:\n\n{ex.Message}", "Bot HF", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            Updater.ApplyPendingIfAnyOnExit();
         }
     }
 
