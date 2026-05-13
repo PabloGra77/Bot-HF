@@ -36,16 +36,19 @@ public sealed class HorusExtractorBot
             : "Guardado incremental desactivado: el Excel se escribirá al final.");
 
         using var playwright = await Playwright.CreateAsync();
-        var context = await playwright.Chromium.LaunchPersistentContextAsync(
-            _cfg.ProfileDir,
-            new BrowserTypeLaunchPersistentContextOptions
-            {
-                Channel = _cfg.BrowserChannel,
-                Headless = _cfg.Headless,
-                SlowMo = _cfg.SlowMoMilliseconds,
-                Args = new[] { "--start-maximized", "--disable-features=Translate" },
-                AcceptDownloads = false
-            });
+
+        var launchArgs = new[] {
+            "--start-maximized",
+            "--disable-features=Translate",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-default-apps",
+            "--disable-background-networking",
+            "--disable-component-update",
+            "--disable-domain-reliability"
+        };
+
+        IBrowserContext context = await LaunchBrowserWithFallbackAsync(playwright, launchArgs);
 
         var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
         page.SetDefaultTimeout(_cfg.TimeoutSeconds * 1000);
@@ -132,6 +135,58 @@ public sealed class HorusExtractorBot
         }
 
         return results;
+    }
+
+    private async Task<IBrowserContext> LaunchBrowserWithFallbackAsync(IPlaywright playwright, string[] launchArgs)
+    {
+        BrowserTypeLaunchPersistentContextOptions BuildOpts(string? channel) => new()
+        {
+            Channel = string.IsNullOrWhiteSpace(channel) ? null : channel,
+            Headless = _cfg.Headless,
+            SlowMo = _cfg.SlowMoMilliseconds,
+            Args = launchArgs,
+            AcceptDownloads = false
+        };
+
+        // Intento 1: canal configurado (msedge por defecto).
+        try
+        {
+            _log.Info($"Lanzando navegador (canal '{_cfg.BrowserChannel}'). Perfil: {_cfg.ProfileDir}");
+            return await playwright.Chromium.LaunchPersistentContextAsync(_cfg.ProfileDir, BuildOpts(_cfg.BrowserChannel));
+        }
+        catch (Exception exEdge)
+        {
+            _log.Warn($"No se pudo lanzar el navegador con canal '{_cfg.BrowserChannel}': {exEdge.Message}");
+            _log.Warn("Sugerencia: cierre todas las ventanas de Microsoft Edge antes de ejecutar el bot.");
+        }
+
+        // Intento 2: instalar/usar Chromium descargado por Playwright.
+        try
+        {
+            _log.Info("Reintentando con Chromium descargado por Playwright. Si es la primera vez puede tardar varios minutos en descargar (~150 MB).");
+            try
+            {
+                var installExit = Microsoft.Playwright.Program.Main(new[] { "install", "chromium" });
+                if (installExit != 0) _log.Warn($"'playwright install chromium' devolvió código {installExit}.");
+            }
+            catch (Exception exInst)
+            {
+                _log.Warn($"No se pudo descargar Chromium automáticamente: {exInst.Message}");
+            }
+
+            return await playwright.Chromium.LaunchPersistentContextAsync(_cfg.ProfileDir, BuildOpts(null));
+        }
+        catch (Exception exChromium)
+        {
+            _log.Error(exChromium, "No se pudo lanzar Chromium tampoco.");
+            throw new InvalidOperationException(
+                "No se pudo iniciar el navegador.\n\n" +
+                "Verifique:\n" +
+                "  1) Cierre todas las ventanas de Microsoft Edge antes de ejecutar.\n" +
+                "  2) Verifique que Microsoft Edge esté instalado y actualizado.\n" +
+                "  3) Si el problema persiste, revise el log de esta sesión.\n\n" +
+                $"Detalle técnico: {exChromium.Message}", exChromium);
+        }
     }
 
     private void SaveIncrementalExcel(IReadOnlyList<ExtractionResult> results, int processedCount)
