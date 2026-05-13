@@ -241,16 +241,20 @@ public sealed class HorusExtractorBot
             await PickUserTypeOptionAsync(page, typeLabel);
             cancellationToken.ThrowIfCancellationRequested();
 
-            // 3) Esperar a que el campo Email aparezca (el formulario lo muestra después de elegir tipo).
-            await page.WaitForTimeoutAsync(400);
-            var emailLoc = page.Locator(_cfg.EmailFieldSelectors).First;
-            await emailLoc.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = _cfg.TimeoutSeconds * 1000 });
-            await emailLoc.FillAsync(credentials.Email);
+            // 3) Esperar a que aparezcan los campos (Vuetify los inserta dinámicamente al elegir tipo).
+            await page.WaitForTimeoutAsync(600);
 
-            // 4) Password.
-            var passLoc = page.Locator(_cfg.PasswordFieldSelectors).First;
-            await passLoc.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = _cfg.TimeoutSeconds * 1000 });
+            // 4) Email: el v-text-field de Vuetify usa label flotante, no <label for>.
+            var emailLoc = await ResolveLoginFieldAsync(page, "Email", _cfg.EmailFieldSelectors, isPassword: false, cancellationToken);
+            try { await emailLoc.ClickAsync(new LocatorClickOptions { Timeout = 5000 }); } catch { }
+            await emailLoc.FillAsync(credentials.Email);
+            _log.Info("Email completado.");
+
+            // 5) Password.
+            var passLoc = await ResolveLoginFieldAsync(page, "Password", _cfg.PasswordFieldSelectors, isPassword: true, cancellationToken);
+            try { await passLoc.ClickAsync(new LocatorClickOptions { Timeout = 5000 }); } catch { }
             await passLoc.FillAsync(credentials.Password);
+            _log.Info("Contraseña completada.");
             cancellationToken.ThrowIfCancellationRequested();
 
             // 5) Botón INICIAR SESIÓN.
@@ -281,6 +285,70 @@ public sealed class HorusExtractorBot
         {
             _log.Warn($"Login automático no completó: {ex.Message}. Si la ventana de navegador sigue en la pantalla de login, complete manualmente y vuelva a presionar continuar.");
         }
+    }
+
+    private async Task<ILocator> ResolveLoginFieldAsync(IPage page, string label, string fallbackSelectors, bool isPassword, CancellationToken ct)
+    {
+        var timeoutMs = _cfg.TimeoutSeconds * 1000;
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+
+        async Task<ILocator?> TryAsync(Func<ILocator> make)
+        {
+            try
+            {
+                var loc = make();
+                if (await loc.CountAsync() == 0) return null;
+                if (await loc.IsVisibleAsync()) return loc;
+            }
+            catch { }
+            return null;
+        }
+
+        while (DateTime.UtcNow < deadline)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            // 1) GetByLabel — funciona si Vuetify expone aria-labelledby correctamente.
+            var hit = await TryAsync(() => page.GetByLabel(label, new PageGetByLabelOptions { Exact = false }).First);
+            if (hit != null) return hit;
+
+            // 2) Vuetify v-text-field: <div class="v-input"> contiene <div class="v-field__label"> con el texto + <input>.
+            hit = await TryAsync(() => page.Locator($"div.v-input:has(.v-field__label:has-text(\"{label}\")) input:not([type=hidden])").First);
+            if (hit != null) return hit;
+
+            // 3) Vuetify alternativo con <label>.
+            hit = await TryAsync(() => page.Locator($"div.v-input:has(label:has-text(\"{label}\")) input:not([type=hidden])").First);
+            if (hit != null) return hit;
+
+            // 4) Por type del input (cuando aplica).
+            if (isPassword)
+            {
+                hit = await TryAsync(() => page.Locator("input[type='password']:not([type=hidden])").First);
+                if (hit != null) return hit;
+            }
+            else
+            {
+                hit = await TryAsync(() => page.Locator("input[type='email']:not([type=hidden])").First);
+                if (hit != null) return hit;
+            }
+
+            // 5) Por aria-label o placeholder.
+            hit = await TryAsync(() => page.Locator($"input[aria-label*='{label}' i]").First);
+            if (hit != null) return hit;
+            hit = await TryAsync(() => page.Locator($"input[placeholder*='{label}' i]").First);
+            if (hit != null) return hit;
+
+            // 6) Selectores configurados en appsettings.json.
+            if (!string.IsNullOrWhiteSpace(fallbackSelectors))
+            {
+                hit = await TryAsync(() => page.Locator(fallbackSelectors).First);
+                if (hit != null) return hit;
+            }
+
+            await page.WaitForTimeoutAsync(400);
+        }
+
+        throw new TimeoutException($"No se encontró el campo '{label}' visible en el formulario de login después de {timeoutMs / 1000}s.");
     }
 
     private async Task OpenUserTypeDropdownAsync(IPage page)
