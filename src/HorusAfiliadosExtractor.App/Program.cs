@@ -44,16 +44,39 @@ internal static class Program
             Updater.UpdateReady += OnUpdateReady;
 
             var cts = new CancellationTokenSource();
+            var control = new ExtractionControl();
+
+            progress.PauseRequested += () =>
+            {
+                control.Pause();
+                progress.AppendLog("[CTRL] Detener solicitado. El bot terminará el documento actual y guardará el Excel con todo lo procesado.");
+                progress.SetPausedState();
+            };
+            progress.ResumeRequested += () =>
+            {
+                control.Resume();
+                progress.AppendLog("[CTRL] Continuar solicitado. Reanudando extracción...");
+                progress.SetResumedState();
+            };
+            progress.FinalizeRequested += () =>
+            {
+                progress.AppendLog("[CTRL] Finalizar solicitado. Guardando Excel y cerrando proceso...");
+                control.Resume(); // si estaba pausado, liberar para que el bot pueda observar la cancelación
+                if (!cts.IsCancellationRequested) cts.Cancel();
+            };
+
             progress.FormClosing += (_, _) =>
             {
                 if (!cts.IsCancellationRequested) cts.Cancel();
+                control.Resume();
                 Updater.StatusChanged -= OnUpdateStatus;
                 Updater.UpdateReady -= OnUpdateReady;
             };
 
-            Task.Run(() => RunExtractionAsync(cfg, login.Credentials, progress, cts.Token));
+            Task.Run(() => RunExtractionAsync(cfg, login.Credentials, progress, control, cts.Token));
 
             Application.Run(progress);
+            control.Dispose();
         }
         catch (Exception ex)
         {
@@ -65,7 +88,7 @@ internal static class Program
         }
     }
 
-    private static async Task RunExtractionAsync(AppConfig cfg, LoginCredentials credentials, ProgressForm progress, CancellationToken ct)
+    private static async Task RunExtractionAsync(AppConfig cfg, LoginCredentials credentials, ProgressForm progress, ExtractionControl control, CancellationToken ct)
     {
         Logger? log = null;
         var success = false;
@@ -92,7 +115,8 @@ internal static class Program
                 cfg.Bot,
                 log,
                 credentials,
-                (current, total, status) => progress.SetProgress(current, total, status));
+                (current, total, status) => progress.SetProgress(current, total, status),
+                control);
 
             var results = await bot.RunAsync(records, ct);
 

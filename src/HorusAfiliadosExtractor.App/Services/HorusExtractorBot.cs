@@ -11,17 +11,20 @@ public sealed class HorusExtractorBot
     private readonly Logger _log;
     private readonly LoginCredentials? _credentials;
     private readonly Action<int, int, string>? _onProgress;
+    private readonly ExtractionControl? _control;
 
     public HorusExtractorBot(
         BotSettings cfg,
         Logger log,
         LoginCredentials? credentials = null,
-        Action<int, int, string>? onProgress = null)
+        Action<int, int, string>? onProgress = null,
+        ExtractionControl? control = null)
     {
         _cfg = cfg;
         _log = log;
         _credentials = credentials;
         _onProgress = onProgress;
+        _control = control;
     }
 
     public async Task<List<ExtractionResult>> RunAsync(List<InputRecord> records, CancellationToken cancellationToken = default)
@@ -71,6 +74,17 @@ public sealed class HorusExtractorBot
             for (var i = 0; i < records.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+
+                // Si el usuario presionó Detener, guardar Excel YA y esperar hasta Continuar / Finalizar.
+                if (_control is { IsPaused: true })
+                {
+                    _log.Info("Pausa solicitada. Guardando Excel con lo procesado hasta este momento...");
+                    ForceSaveExcel(results);
+                    _onProgress?.Invoke(i, records.Count, "Pausado - Excel guardado");
+                    await _control.WaitIfPausedAsync(cancellationToken);
+                    _log.Info("Reanudando extracción.");
+                }
+
                 var record = records[i];
                 _onProgress?.Invoke(i, records.Count, $"Procesando {record.Documento}");
 
@@ -204,6 +218,19 @@ public sealed class HorusExtractorBot
         catch (Exception ex)
         {
             _log.Warn($"No se pudo actualizar el Excel incremental. Cierre el archivo si está abierto. Detalle: {ex.Message}");
+        }
+    }
+
+    private void ForceSaveExcel(IReadOnlyList<ExtractionResult> results)
+    {
+        try
+        {
+            ExcelWriter.Save(_cfg.OutputExcelPath, results);
+            _log.Info($"Excel guardado bajo demanda ({results.Count} registro(s)): {_cfg.OutputExcelPath}");
+        }
+        catch (Exception ex)
+        {
+            _log.Warn($"No se pudo guardar el Excel bajo demanda. Cierre el archivo si está abierto. Detalle: {ex.Message}");
         }
     }
 

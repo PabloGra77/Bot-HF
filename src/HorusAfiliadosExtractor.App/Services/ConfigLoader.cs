@@ -26,26 +26,48 @@ public static class ConfigLoader
 
     private static void Normalize(AppConfig cfg, string configDir)
     {
-        // Datos del usuario fuera del install dir (Velopack rota 'current\' en cada update).
+        // Perfil persistente del navegador: en %LOCALAPPDATA% para sobrevivir updates de Velopack.
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var botData = Path.Combine(localAppData, "BotHFData");
+        var profileBase = Path.Combine(localAppData, "BotHFData");
 
-        var docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-        var botDocs = Path.Combine(docs, "BotHF");
+        // Resultados visibles para el usuario: en Descargas\BotHF.
+        var downloads = ResolveDownloadsFolder();
+        var botDownloads = Path.Combine(downloads, "BotHF");
 
-        cfg.Bot.ProfileDir = ResolveDataPath(cfg.Bot.ProfileDir, botData, "profiles/horus_fps");
-        cfg.Bot.EvidenceDir = ResolveDataPath(cfg.Bot.EvidenceDir, botDocs, "evidence");
-        cfg.Bot.LogDir = ResolveDataPath(cfg.Bot.LogDir, botDocs, "logs");
-        cfg.Bot.OutputExcelPath = ResolveDataPath(cfg.Bot.OutputExcelPath, botDocs, "output/extraccion_horus_afiliados.xlsx");
+        cfg.Bot.ProfileDir = ResolveDataPath(cfg.Bot.ProfileDir, profileBase, "profiles/horus_fps");
+        cfg.Bot.EvidenceDir = ResolveDataPath(cfg.Bot.EvidenceDir, botDownloads, "Pantallazos");
+        cfg.Bot.LogDir = ResolveDataPath(cfg.Bot.LogDir, botDownloads, "Logs");
+        cfg.Bot.OutputExcelPath = ResolveDataPath(cfg.Bot.OutputExcelPath, botDownloads, "Excel/extraccion_horus_afiliados.xlsx");
 
-        // El archivo de entrada se sigue resolviendo contra la raíz del proyecto en dev,
-        // pero la UI permite que el usuario lo escoja con un OpenFileDialog.
         cfg.Bot.InputPath = ToProjectPath(cfg.Bot.InputPath, configDir);
 
         Directory.CreateDirectory(cfg.Bot.ProfileDir);
-        Directory.CreateDirectory(Path.GetDirectoryName(cfg.Bot.OutputExcelPath) ?? botDocs);
+        Directory.CreateDirectory(Path.GetDirectoryName(cfg.Bot.OutputExcelPath) ?? botDownloads);
         Directory.CreateDirectory(cfg.Bot.EvidenceDir);
         Directory.CreateDirectory(cfg.Bot.LogDir);
+    }
+
+    private static string ResolveDownloadsFolder()
+    {
+        // Windows: %USERPROFILE%\Downloads. La constante FOLDERID_Downloads no existe
+        // en Environment.SpecialFolder, pero esta convención cubre el caso por defecto.
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var downloads = Path.Combine(profile, "Downloads");
+        if (Directory.Exists(downloads)) return downloads;
+
+        // Si el usuario redirigió Downloads, intentar leer del registro.
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders");
+            var value = key?.GetValue("{374DE290-123F-4565-9164-39C4925E467B}") as string;
+            if (!string.IsNullOrWhiteSpace(value))
+                return Environment.ExpandEnvironmentVariables(value);
+        }
+        catch { }
+
+        Directory.CreateDirectory(downloads);
+        return downloads;
     }
 
     private static string ResolveDataPath(string configValue, string baseDir, string fallback)
