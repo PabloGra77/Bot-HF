@@ -1,0 +1,103 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versión a publicar (sin la v, ej: 1.0.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Resolver versión
+        id: ver
+        shell: pwsh
+        run: |
+          if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
+            $ver = '${{ github.event.inputs.version }}'
+          } else {
+            $ver = '${{ github.ref_name }}' -replace '^v', ''
+          }
+          Write-Host "Version detectada: $ver"
+          "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Instalar Velopack CLI
+        run: dotnet tool install -g vpk
+
+      - name: dotnet publish (self-contained win-x64)
+        shell: pwsh
+        run: |
+          if (Test-Path publish\BotHF) { Remove-Item publish\BotHF -Recurse -Force }
+          dotnet publish src\HorusAfiliadosExtractor.App\HorusAfiliadosExtractor.App.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            /p:PublishSingleFile=false `
+            /p:PublishTrimmed=false `
+            -o publish\BotHF
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Copiar config y plantilla al directorio publicado
+        shell: pwsh
+        run: |
+          Copy-Item -Path config -Destination publish\BotHF\config -Recurse -Force
+          New-Item -ItemType Directory -Force -Path publish\BotHF\input | Out-Null
+          if (Test-Path input\cedulas.example.csv) {
+            Copy-Item input\cedulas.example.csv publish\BotHF\input\cedulas.csv -Force
+          }
+
+      - name: Empaquetar release con vpk
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path releases | Out-Null
+          vpk pack `
+            --packId BotHF `
+            --packVersion ${{ steps.ver.outputs.version }} `
+            --packDir publish\BotHF `
+            --mainExe HorusBotHF.exe `
+            --packTitle "Bot HF - Extractor Horus FPS" `
+            --packAuthors "Horus FPS" `
+            --outputDir releases
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Get-ChildItem releases
+
+      - name: Crear GitHub Release y subir archivos
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: Bot HF v${{ steps.ver.outputs.version }}
+          body: |
+            Bot HF - Extractor de Afiliados Horus FPS
+
+            **Primera instalación:** descargue `BotHF-Setup.exe` y ejecútelo.
+
+            **Actualización automática:** si ya tiene el bot instalado, no necesita hacer nada — la aplicación se actualizará sola la próxima vez que la abra.
+
+            Archivos publicados:
+            - `BotHF-Setup.exe` — instalador (solo primera vez).
+            - `BotHF-${{ steps.ver.outputs.version }}-full.nupkg` — paquete de actualización.
+            - `RELEASES` — manifiesto de versiones.
+          files: |
+            releases/*.exe
+            releases/*.nupkg
+            releases/RELEASES
+          fail_on_unmatched_files: true
+          draft: false
+          prerelease: false
